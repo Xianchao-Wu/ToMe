@@ -6,4 +6,5 @@
 #########################################################################
 #!/bin/bash
 
-python -m ipdb 0_validation_timm.py
+#python -m ipdb 0_validation_timm.py
+python 0_validation_timm.py
