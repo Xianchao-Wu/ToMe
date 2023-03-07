@@ -18,7 +18,7 @@ def do_nothing(x, mode=None):
 def bipartite_soft_matching(
     metric: torch.Tensor, # [1, 197, 64]
     r: int, # 4
-    class_token: bool = False, # True
+    class_token: bool = False, # True, 197=seq.len的最左边一个是CLS token
     distill_token: bool = False, # False
 ) -> Tuple[Callable, Callable]:
     """
@@ -33,7 +33,7 @@ def bipartite_soft_matching(
 
     When enabled, the class token and distillation tokens won't get merged.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     protected = 0
     if class_token: # True
         protected += 1
@@ -70,8 +70,8 @@ def bipartite_soft_matching(
             # Sort to ensure the class token is at the start
             unm_idx = unm_idx.sort(dim=1)[0] # [1, 95, 1] TODO 左边的index重新从小到大排序了. 对于语音非常重要
     # x.shape=[1, 197, 768], mode='sum', 
-    def merge(x: torch.Tensor, mode="mean") -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
+    def merge(x: torch.Tensor, mode="mean", is_recover=True) -> torch.Tensor:
+        #import ipdb; ipdb.set_trace()
         src, dst = x[..., ::2, :], x[..., 1::2, :] # src.shape=[1, 99, 768], dst.shape=[1, 98, 768]
         n, t1, c = src.shape # 1, 99, 768
         unm = src.gather(dim=-2, index=unm_idx.expand(n, t1 - r, c)) # NOTE [1, 95, 1] -> expand -> [1, 95, 768], 最后的768，对于95行，每一列都一样! NOTE 
@@ -79,25 +79,55 @@ def bipartite_soft_matching(
         dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode) # [1, 98, 768] -> out dst.shape=[1, 98, 768]
 
         if distill_token: # False
-            return torch.cat([unm[:, :1], dst[:, :1], unm[:, 1:], dst[:, 1:]], dim=1)
+            #return torch.cat([unm[:, :1], dst[:, :1], unm[:, 1:], dst[:, 1:]], dim=1)
+            out = torch.cat([unm[:, :1], dst[:, :1], unm[:, 1:], dst[:, 1:]], dim=1)
+            if is_recover:
+                out = recover(out, mode)
+            return out
         else:
-            return torch.cat([unm, dst], dim=1) # [1, 95, 768], [1, 98, 768] -> [1, 193, 768]
+            #return torch.cat([unm, dst], dim=1) # [1, 95, 768], [1, 98, 768] -> [1, 193, 768] TODO, 问题：这个直接合并，有问题，把原来的顺序给打乱了...
+            out = torch.cat([unm, dst], dim=1) # [1, 95, 768], [1, 98, 768] -> [1, 193, 768] TODO, 问题：这个直接合并，有问题，把原来的顺序给打乱了...
+            if is_recover:
+                out = recover(out, mode)
+            return out
 
-    def unmerge(x: torch.Tensor) -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
-        unm_len = unm_idx.shape[1]
+    def unmerge(x: torch.Tensor, mode='mean') -> torch.Tensor: # [1, 193, 768]
+        #import ipdb; ipdb.set_trace()
+        unm_len = unm_idx.shape[1] # 95 (197 -> 99 + 98 and left is 99-4=95)
+        unm, dst = x[..., :unm_len, :], x[..., unm_len:, :] # left=umn=[1, 95, 768], right=dst=[1, 98, 768]
+        n, _, c = unm.shape # n=1, c=768
+        # src 在被使用之前，还没有被定义! NOTE
+        src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c)) # src.shape=[1, 4, 768]
+
+        out = torch.zeros(n, metric.shape[1], c, device=x.device, dtype=x.dtype) # [1, 197, 768], all 0
+
+        out[..., 1::2, :] = dst # 右边的98个向量，追加到out里面，都是奇数位置
+        out.scatter_(dim=-2, index=(2 * unm_idx).expand(n, unm_len, c), src=unm) # 95个左边的没有被merge的向量，加到out的偶数位置! good NOTE
+        out.scatter_(dim=-2, index=(2 * src_idx).expand(n, r, c), src=src) # 4个被动过的向量(原来是在左边，后来是sum/avg到右边，然后现在用的是均值!)
+
+        return out # out.shape=[1, 197, 768]
+
+    def recover(x: torch.Tensor, mode='mean') -> torch.Tensor:
+        '''
+        recover the original order of the tensor
+        '''
+        #import ipdb; ipdb.set_trace()
+        unm_len = unm_idx.shape[1] # 95
         unm, dst = x[..., :unm_len, :], x[..., unm_len:, :]
         n, _, c = unm.shape
 
         src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c))
-
         out = torch.zeros(n, metric.shape[1], c, device=x.device, dtype=x.dtype)
+        out[...] = -math.inf
 
         out[..., 1::2, :] = dst
         out.scatter_(dim=-2, index=(2 * unm_idx).expand(n, unm_len, c), src=unm)
-        out.scatter_(dim=-2, index=(2 * src_idx).expand(n, r, c), src=src)
-
+        #out.scatter_(dim=-2, index=(2 * src_idx).expand(n, r, c), src=src)
+        
+        mask = out.ne(-math.inf)
+        out = torch.masked_select(out, mask).reshape(n, -1, c)
         return out
+
 
     return merge, unmerge
 
@@ -113,12 +143,12 @@ def kth_bipartite_soft_matching(
     z indicates the stride for the first set.
     z = 2 is equivalent to regular bipartite_soft_matching with r = 0.5 * N
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if k <= 1:
         return do_nothing, do_nothing
 
     def split(x):
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         t_rnd = (x.shape[1] // k) * k
         x = x[:, :t_rnd, :].view(x.shape[0], -1, k, x.shape[2])
         a, b = (
@@ -137,7 +167,7 @@ def kth_bipartite_soft_matching(
         dst_idx = dst_idx[..., None]
 
     def merge(x: torch.Tensor, mode="mean") -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         src, dst = split(x)
         n, _, c = src.shape
         dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode)
@@ -145,7 +175,7 @@ def kth_bipartite_soft_matching(
         return dst
 
     def unmerge(x: torch.Tensor) -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         n, _, c = x.shape
         dst = x
 
@@ -171,7 +201,7 @@ def random_bipartite_soft_matching(
 
     This will reduce the number of tokens by r.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if r <= 0:
         return do_nothing, do_nothing
 
@@ -196,7 +226,7 @@ def random_bipartite_soft_matching(
         dst_idx = dst_idx[..., None]
 
     def merge(x: torch.Tensor, mode="mean") -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         src, dst = split(x)
         C = src.shape[-1]
         dst = dst.scatter_reduce(-2, dst_idx.expand(B, r, C), src, reduce=mode)
@@ -204,7 +234,7 @@ def random_bipartite_soft_matching(
         return dst
 
     def unmerge(x: torch.Tensor) -> torch.Tensor:
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         C = x.shape[-1]
         dst = x
         src = dst.gather(dim=-2, index=dst_idx.expand(B, r, C))
@@ -218,7 +248,7 @@ def random_bipartite_soft_matching(
 
     return merge, unmerge
 
-# x.shape=[1, 197, 768], size=None
+# merge function, x.shape=[1, 197, 768], size=None ||| debug unmerge x.shape=[1, 193, 768], size=[1, 193, 1]
 def merge_wavg(
     merge: Callable, x: torch.Tensor, size: torch.Tensor = None
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -226,14 +256,14 @@ def merge_wavg(
     Applies the merge function by taking a weighted average based on token size.
     Returns the merged tensor and the new token sizes.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if size is None: # None
         size = torch.ones_like(x[..., 0, None]) # [1, 197, 1] all = 1
 
     x = merge(x * size, mode="sum") # x.shape=[1, 193, 768]
     size = merge(size, mode="sum") # size.shape=[1, 193, 1]
-
-    x = x / size # 这是做一个平均化，size里，有些地方是2，有些是1
+    
+    x = x / size # x里面本来是'sum'，NOTE 这是做一个平均化，size里，有些地方是2，有些是1
     return x, size # x.shape=[1, 193, 768], size.shape=[1, 193, 1]
 
 
@@ -244,11 +274,11 @@ def merge_source(
     For source tracking. Source is an adjacency matrix between the initial tokens and final merged groups.
     x is used to find out how many tokens there are in case the source is None.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if source is None:
-        n, t, _ = x.shape
+        n, t, _ = x.shape # [1, 197, 768]
         source = torch.eye(t, device=x.device)[None, ...].expand(n, t, t)
-
+        # [1, 197, 197] -> 这是一个单位矩阵
     source = merge(source, mode="amax")
-    return source
+    return source # [1, 193, 197]
 

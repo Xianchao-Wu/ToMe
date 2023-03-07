@@ -21,13 +21,13 @@ except ImportError:
 
 def generate_colormap(N: int, seed: int = 0) -> List[Tuple[float, float, float]]:
     """Generates a equidistant colormap with N elements."""
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     random.seed(seed)
 
     def generate_color():
         return (random.random(), random.random(), random.random())
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
    
     return [generate_color() for _ in range(N)]
 
@@ -44,7 +44,7 @@ def make_visualization(
     Returns:
      - A PIL image the same size as the input.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
 
     img = np.array(img.convert("RGB")) / 255.0
     source = source.detach().cpu()
@@ -80,5 +80,5 @@ def make_visualization(
     # Convert back into a PIL image
     vis_img = Image.fromarray(np.uint8(vis_img * 255))
 
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     return vis_img

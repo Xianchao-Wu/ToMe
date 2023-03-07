@@ -38,7 +38,7 @@ def benchmark(
     Returns:
      - the throughput measured in images / second
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     if not isinstance(device, torch.device):
         device = torch.device(device)
     is_cuda = torch.device(device).type == "cuda"
@@ -91,7 +91,7 @@ def parse_r(num_layers: int, r: Union[List[int], Tuple[int, float], int]) -> Lis
        as "decreasing schedule". Any value between -1 and +1 is accepted.
      - List[int]: A specific number of tokens per layer. For extreme granularity.
     """
-    import ipdb; ipdb.set_trace()
+    #import ipdb; ipdb.set_trace()
     inflect = 0 # 弯曲
     if isinstance(r, list):
         if len(r) < num_layers:
@@ -106,3 +106,4 @@ def parse_r(num_layers: int, r: Union[List[int], Tuple[int, float], int]) -> Lis
 
     return [int(min_val + step * i) for i in range(num_layers)]
     # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    # or, [4, 4, ..., 4]
