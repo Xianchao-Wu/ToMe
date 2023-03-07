@@ -78,7 +78,7 @@ def bipartite_soft_matching(
         if is_adjoin:
             # (src_idx == dst_idx) + (src_idx == dst_idx + 1) 
             # first consider inference case, than training case...
-            import ipdb; ipdb.set_trace()
+            #import ipdb; ipdb.set_trace()
             if metric.shape[0] == 1:
                 # batch size = 1
                 src_idx = edge_idx[..., :3*r, :] # [1, 4, 1]
@@ -87,7 +87,7 @@ def bipartite_soft_matching(
                 
                 src_idx = src_idx[flag].reshape(1, -1, 1)[..., :r, :]
                 dst_idx = dst_idx[flag].reshape(1, -1, 1)[..., :r, :]
-                print(flag, src_idx.shape, dst_idx.shape)
+                #print(flag, src_idx.shape, dst_idx.shape)
                 
                 mask = torch.zeros(edge_idx.shape[1], dtype=torch.bool)
 
@@ -125,15 +125,20 @@ def bipartite_soft_matching(
         # src.shape=[1, 99, 768], dst.shape=[1, 98, 768]
 
         n, t1, c = src.shape # 1, 99, 768
-        import ipdb; ipdb.set_trace()
+        #import ipdb; ipdb.set_trace()
         # NOTE a bug was here, since unm_idx.shape[1] can possibly not = t1 - r
         # unm = src.gather(dim=-2, index=unm_idx.expand(n, t1 - r, c)) 
         unm = src.gather(dim=-2, index=unm_idx.expand(n, unm_idx.shape[1], c)) 
         # NOTE [1, 95, 1] -> expand -> [1, 95, 768], 
         # 最后的768，对于95行，每一列都一样! NOTE 
 
-        src = src.gather(dim=-2, index=src_idx.expand(n, r, c)) # [1, 4, 768]
-        dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode) 
+        #src = src.gather(dim=-2, index=src_idx.expand(n, r, c)) # [1, 4, 768]
+        src = src.gather(dim=-2, index=src_idx.expand(n, src_idx.shape[1], c)) 
+        # [1, <=4 which can be 4 or smaller, 768]
+
+        #dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode) 
+        dst = dst.scatter_reduce(-2, dst_idx.expand(n, 
+            dst_idx.shape[1], c), src, reduce=mode) 
         # [1, 98, 768] -> out dst.shape=[1, 98, 768]
 
         if distill_token: # False
@@ -158,7 +163,8 @@ def bipartite_soft_matching(
 
         n, _, c = unm.shape # n=1, c=768
         # src 在被使用之前，还没有被定义! NOTE
-        src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c)) # src.shape=[1, 4, 768]
+        src = dst.gather(dim=-2, 
+                index=dst_idx.expand(n, dst_idx.shape[1], c)) # src.shape=[1, 4, 768]
 
         out = torch.zeros(n, metric.shape[1], c, device=x.device, dtype=x.dtype) 
         # [1, 197, 768], all 0
@@ -167,7 +173,7 @@ def bipartite_soft_matching(
         out.scatter_(dim=-2, index=(2 * unm_idx).expand(n, unm_len, c), src=unm) 
         # 95个左边的没有被merge的向量，加到out的偶数位置! good NOTE
 
-        out.scatter_(dim=-2, index=(2 * src_idx).expand(n, r, c), src=src) 
+        out.scatter_(dim=-2, index=(2 * src_idx).expand(n, src_idx.shape[1], c), src=src) 
         # 4个被动过的向量(原来是在左边，后来是sum/avg到右边，然后现在用的是均值!)
 
         return out # out.shape=[1, 197, 768]
@@ -181,7 +187,8 @@ def bipartite_soft_matching(
         unm, dst = x[..., :unm_len, :], x[..., unm_len:, :]
         n, _, c = unm.shape
 
-        src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c))
+        #src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c))
+        src = dst.gather(dim=-2, index=dst_idx.expand(n, dst_idx.shape[1], c))
         out = torch.zeros(n, metric.shape[1], c, device=x.device, dtype=x.dtype)
         out[...] = -math.inf
 
@@ -235,7 +242,9 @@ def kth_bipartite_soft_matching(
         #import ipdb; ipdb.set_trace()
         src, dst = split(x)
         n, _, c = src.shape
-        dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode)
+        #dst = dst.scatter_reduce(-2, dst_idx.expand(n, r, c), src, reduce=mode)
+        dst = dst.scatter_reduce(-2, 
+                dst_idx.expand(n, dst_idx.shape[1], c), src, reduce=mode)
 
         return dst
 
@@ -244,7 +253,9 @@ def kth_bipartite_soft_matching(
         n, _, c = x.shape
         dst = x
 
-        src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c)).to(x.dtype)
+        #src = dst.gather(dim=-2, index=dst_idx.expand(n, r, c)).to(x.dtype)
+        src = dst.gather(dim=-2, 
+                index=dst_idx.expand(n, dst_idx.shape[1], c)).to(x.dtype)
 
         src = src.view(n, -1, (k - 1), c)
         dst = dst.view(n, -1, 1, c)
@@ -279,8 +290,9 @@ def random_bipartite_soft_matching(
 
         def split(x):
             C = x.shape[-1]
-            a = x.gather(dim=1, index=a_idx.expand(B, r, C))
-            b = x.gather(dim=1, index=b_idx.expand(B, N - r, C))
+            a = x.gather(dim=1, index=a_idx.expand(B, a_idx.shape[1], C))
+            #b = x.gather(dim=1, index=b_idx.expand(B, N - r, C))
+            b = x.gather(dim=1, index=b_idx.expand(B, b_idx.shape[1], C))
             return a, b
 
         metric = metric / metric.norm(dim=-1, keepdim=True)
@@ -294,7 +306,9 @@ def random_bipartite_soft_matching(
         #import ipdb; ipdb.set_trace()
         src, dst = split(x)
         C = src.shape[-1]
-        dst = dst.scatter_reduce(-2, dst_idx.expand(B, r, C), src, reduce=mode)
+        #dst = dst.scatter_reduce(-2, dst_idx.expand(B, r, C), src, reduce=mode)
+        dst = dst.scatter_reduce(-2, 
+                dst_idx.expand(B, dst_idx.shape[1], C), src, reduce=mode)
 
         return dst
 
@@ -302,12 +316,15 @@ def random_bipartite_soft_matching(
         #import ipdb; ipdb.set_trace()
         C = x.shape[-1]
         dst = x
-        src = dst.gather(dim=-2, index=dst_idx.expand(B, r, C))
+        #src = dst.gather(dim=-2, index=dst_idx.expand(B, r, C))
+        src = dst.gather(dim=-2, index=dst_idx.expand(B, dst_idx.shape[1], C))
 
         out = torch.zeros(B, N, C, device=x.device, dtype=x.dtype)
 
-        out.scatter_(dim=-2, index=a_idx.expand(B, r, C), src=src)
-        out.scatter_(dim=-2, index=b_idx.expand(B, N - r, C), src=dst)
+        #out.scatter_(dim=-2, index=a_idx.expand(B, r, C), src=src)
+        out.scatter_(dim=-2, index=a_idx.expand(B, a_idx.shape[1], C), src=src)
+        #out.scatter_(dim=-2, index=b_idx.expand(B, N - r, C), src=dst)
+        out.scatter_(dim=-2, index=b_idx.expand(B, b_idx.shape[1], C), src=dst)
 
         return out
 
