@@ -56,8 +56,14 @@ def bipartite_soft_matching(
         a, b = metric[..., ::2, :], metric[..., 1::2, :] 
         # a.shape=[1, 99, 64], b.shape=[1, 98, 64] 
         # ||| a.shape=[1, 97, 64], b.shape=[1, 96, 64]
+        import ipdb; ipdb.set_trace()
         scores = a @ b.transpose(-1, -2) # [1, 99, 64] * [1, 64, 98] -> [1, 99, 98] 
         # ||| [1, 97, 96]
+        u, v = a.shape[-2], b.shape[-2]
+        diag = torch.zeros(u).fill_(100.0)
+        mask = torch.diag(diag)[:u, :v] + torch.diag(diag, -1)[:u, :v] - 100.0
+        scores = scores + mask
+
 
         if class_token: # True
             scores[..., 0, :] = -math.inf # 每个seq中的第0个token
@@ -78,7 +84,7 @@ def bipartite_soft_matching(
         if is_adjoin:
             # (src_idx == dst_idx) + (src_idx == dst_idx + 1) 
             # first consider inference case, than training case...
-            #import ipdb; ipdb.set_trace()
+            import ipdb; ipdb.set_trace()
             if metric.shape[0] == 1:
                 # batch size = 1
                 src_idx = edge_idx[..., :3*r, :] # [1, 4, 1]
@@ -94,7 +100,7 @@ def bipartite_soft_matching(
                 for val in src_idx[0, :, 0]:
                     mask = mask | torch.eq(edge_idx.squeeze(), val)
 
-                #import ipdb; ipdb.set_trace()
+                import ipdb; ipdb.set_trace()
                 unm_idx = torch.index_select(edge_idx, 1, (~mask).nonzero().squeeze())
             else:
                 print('batch size > 1 TODO')

@@ -38,7 +38,7 @@ def benchmark(
     Returns:
      - the throughput measured in images / second
     """
-    #import ipdb; ipdb.set_trace()
+    import ipdb; ipdb.set_trace()
     if not isinstance(device, torch.device):
         device = torch.device(device)
     is_cuda = torch.device(device).type == "cuda"
